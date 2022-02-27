@@ -347,13 +347,6 @@
         url: 'https://us-west-2.console.aws.amazon.com/console/home',
       },
       {
-        hues: ['32', '22'],
-        key: 'o',
-        name: 'Sounds',
-        search: '/search?q={}',
-        url: 'https://soundcloud.com/discover',
-      },
-      {
         hues: ['13', '33'],
         key: 'h',
         name: 'Hunt',
@@ -376,6 +369,11 @@
         key: '0',
         name: 'Local',
         url: 'http://localhost:3000',
+      },
+			{
+        key: 'o',
+        name: 'One Platform',
+        url: 'https://one.vermeer.com',
       },
     ].map((command) => {
       const hsla = (hue, saturation = 'var(--command-color-saturation)') =>
