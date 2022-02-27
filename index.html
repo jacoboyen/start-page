@@ -148,6 +148,12 @@
         search: '/search?q={}',
         url: 'https://www.google.com',
       },
+			{
+				hues: ['100', '57'],
+        key: 'o',
+        name: 'One Platform',
+        url: 'https://one.vermeer.com',
+      },
       {
         key: 'ddg',
         search: '/?q={}',
@@ -214,12 +220,7 @@
         search: '/search/{}',
         url: 'https://unsplash.com/images',
       },
-			{
-				hues: ['100', '57'],
-        key: 'o',
-        name: 'One Platform',
-        url: 'https://one.vermeer.com',
-      },
+
 			{
 				key: 'ibra',
         name: 'Iowa Bicycle Racing Association',
@@ -362,6 +363,8 @@
     font-family: var(--base-font-family);
     font-size: var(--base-font-size);
     font-weight: var(--base-font-weight-normal);
+
+
   }
 
   body {
@@ -374,6 +377,9 @@
     padding: 0;
     background: var(--base-background);
     color: var(--base-foreground);
+		background-image: url('https://source.unsplash.com/1600x900');
+		background-size: cover;
+		background-repeat: no-repeat;
   }
 
   input,
@@ -439,12 +445,14 @@
     display: block;
     font-size: var(--clock-font-size);
     cursor: pointer;
+		text-shadow: #000 0px 0 15px;
   }
 
   .help {
-    background: var(--base-background);
+    background-color: rgba(0,0,0,.5);
     visibility: hidden;
     z-index: 1;
+		padding: 5%;
   }
 
   body.help .help {
