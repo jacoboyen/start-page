@@ -220,12 +220,21 @@
         search: '/search/{}',
         url: 'https://unsplash.com/images',
       },
-
 			{
 				key: 'ibra',
         name: 'IBRA',
         url: 'https://www.iowabicycleracing.org/',
       },
+			{
+				key: 'gc',
+				name: 'Garmin Connect',
+				url: 'https://connect.garmin.com/modern/activities',
+			},
+			{
+				key: 's',
+				name: 'Strava',
+				url: 'https://www.strava.com/dashboard',
+			}
     ].map((command) => {
       const hsla = (hue, saturation = 'var(--command-color-saturation)') =>
         `hsla(${hue}, ${saturation}, var(--command-color-lightness), 1)`;
