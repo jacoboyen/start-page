@@ -1448,5 +1448,36 @@
       timeZone: CONFIG.clockTimeZone,
       twentyFourHour: CONFIG.clockTwentyFourHour,
     });
+	const accessKey = '9uCZ_OFTPqpmswnYTa6VdEc3rS-tZEFyU3vsdky0fGQ';
+	
+	// URL for the Unsplash API endpoint
+	const apiUrl = 'https://api.unsplash.com/photos/random?query=nature';
+	
+	// Perform the fetch request
+	fetch(apiUrl, {
+	  method: 'GET',
+	  headers: {
+	    'Authorization': `Client-ID ${accessKey}`,
+	    'Content-Type': 'application/json'
+	  }
+	})
+	  .then(response => {
+	    if (!response.ok) {
+	      throw new Error(`HTTP error! status: ${response.status}`);
+	    }
+	    return response.json();
+	  })
+	  .then(data => {
+	    // Extract the URL of the image from the response data
+	    const imageUrl = data.urls.full;
+	
+	    // Set the background image of the body element
+	    document.body.style.backgroundImage = `url(${imageUrl})`;
+	    document.body.style.backgroundSize = 'cover';
+	    document.body.style.backgroundPosition = 'center';
+	  })
+	  .catch(error => {
+	    console.error('Error fetching data:', error);
+	  });
   </script>
 </html>
