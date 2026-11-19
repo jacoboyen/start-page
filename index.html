@@ -1502,11 +1502,15 @@
      * Background image
      *
      * Loading strategy:
-     *   1. Ask Unsplash for a random photo. The response includes a tiny
-     *      "blur_hash" string (~30 chars) describing a blurry version of it.
+     *   1. Use the photo queued up by the previous visit (saved in
+     *      localStorage), or ask Unsplash for a random one if there isn't one.
+     *      Unsplash includes a tiny "blur_hash" string (~30 chars) describing
+     *      a blurry version of the photo.
      *   2. Decode the blur hash into a small image and show it right away.
      *   3. Download a photo sized for this screen (not the multi-MB original)
      *      and fade it in over the blur once it's fully decoded.
+     *   4. Fetch the next random photo, save it for the next visit and
+     *      download it so it's already in the browser cache.
      */
     const UNSPLASH_ACCESS_KEY = "9uCZ_OFTPqpmswnYTa6VdEc3rS-tZEFyU3vsdky0fGQ";
     const UNSPLASH_RANDOM_PHOTO_URL =
@@ -1623,28 +1627,74 @@
       return `${photo.urls.raw}&w=${width}&q=80&auto=format&fit=max`;
     }
 
-    async function loadBackground() {
-      const placeholderEl = $.el("#background-placeholder");
-      const photoEl = $.el("#background-photo");
+    const NEXT_BACKGROUND_KEY = "nextBackground";
 
+    // localStorage can be unavailable (private mode, blocked storage), so
+    // treat any failure as "nothing saved".
+    function readSavedBackground() {
+      try {
+        return JSON.parse(localStorage.getItem(NEXT_BACKGROUND_KEY));
+      } catch {
+        return null;
+      }
+    }
+
+    function saveBackground(background) {
+      try {
+        localStorage.setItem(NEXT_BACKGROUND_KEY, JSON.stringify(background));
+      } catch {
+        // Not saved; the next visit will just fetch a photo itself.
+      }
+    }
+
+    // Returns just what we need to show a photo: { color, blurHash, url }.
+    async function fetchRandomBackground() {
       const response = await fetch(UNSPLASH_RANDOM_PHOTO_URL, {
         headers: { Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}` },
       });
       if (!response.ok) throw new Error(`Unsplash error: ${response.status}`);
       const photo = await response.json();
 
-      // Step 2: show the average color, then the blur, instantly.
-      placeholderEl.style.backgroundColor = photo.color;
-      if (photo.blur_hash) {
-        placeholderEl.style.backgroundImage = `url(${BlurHash.toDataUrl(photo.blur_hash)})`;
+      return {
+        color: photo.color,
+        blurHash: photo.blur_hash,
+        url: sizedPhotoUrl(photo),
+      };
+    }
+
+    async function showBackground(background) {
+      const placeholderEl = $.el("#background-placeholder");
+      const photoEl = $.el("#background-photo");
+
+      // Show the average color, then the blur, instantly.
+      placeholderEl.style.backgroundColor = background.color;
+      if (background.blurHash) {
+        placeholderEl.style.backgroundImage = `url(${BlurHash.toDataUrl(background.blurHash)})`;
       }
 
-      // Step 3: download and decode the real photo off-screen, then fade it in.
+      // Download and decode the real photo off-screen, then fade it in.
       const image = new Image();
-      image.src = sizedPhotoUrl(photo);
+      image.src = background.url;
       await image.decode();
       photoEl.style.backgroundImage = `url(${image.src})`;
       photoEl.classList.add("loaded");
+    }
+
+    async function loadBackground() {
+      const current = readSavedBackground() ?? (await fetchRandomBackground());
+      const currentShown = showBackground(current).catch((error) => {
+        console.error("Could not show background:", error);
+      });
+
+      // Queue up the next photo for the next visit.
+      const next = await fetchRandomBackground();
+      saveBackground(next);
+
+      // Download it once the current photo is done, so the two don't compete
+      // for bandwidth. Unsplash images are cached by the browser, so the next
+      // visit shows it without waiting on the network.
+      await currentShown;
+      new Image().src = next.url;
     }
 
     loadBackground().catch((error) => {
