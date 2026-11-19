@@ -5,6 +5,8 @@
   <meta name="robots" content="noindex" />
 	<meta name="google" content="notranslate" />
   <link rel="icon" href="favicon.png" />
+  <link rel="preconnect" href="https://api.unsplash.com" />
+  <link rel="preconnect" href="https://images.unsplash.com" />
   <title>Start Page - Jacob Oyen</title>
 
   <script>
@@ -543,6 +545,34 @@
       overflow: auto;
     }
 
+    /* background layers: blurry placeholder, with the real photo fading in on top */
+
+    .background {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      background-position: center;
+      background-size: cover;
+    }
+
+    .background-photo {
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+
+    .background-photo.loaded {
+      opacity: 1;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .background-photo {
+        transition: none;
+      }
+    }
+
     /* main styles */
 
     .clock {
@@ -665,6 +695,8 @@
     }
   </style>
 
+  <div class="background" id="background-placeholder"></div>
+  <div class="background background-photo" id="background-photo"></div>
   <div class="center">
     <time class="clock" id="clock" />
   </div>
@@ -1466,36 +1498,207 @@
       timeZone: CONFIG.clockTimeZone,
       twentyFourHour: CONFIG.clockTwentyFourHour,
     });
-	const accessKey = '9uCZ_OFTPqpmswnYTa6VdEc3rS-tZEFyU3vsdky0fGQ';
-	
-	// URL for the Unsplash API endpoint
-	const apiUrl = 'https://api.unsplash.com/photos/random?query=cool+wallpapers&orientation=landscape&content_filter=high';
-	
-	// Perform the fetch request
-	fetch(apiUrl, {
-	  method: 'GET',
-	  headers: {
-	    'Authorization': `Client-ID ${accessKey}`,
-	    'Content-Type': 'application/json'
-	  }
-	})
-	  .then(response => {
-	    if (!response.ok) {
-	      throw new Error(`HTTP error! status: ${response.status}`);
-	    }
-	    return response.json();
-	  })
-	  .then(data => {
-	    // Extract the URL of the image from the response data
-	    const imageUrl = data.urls.full;
-	
-	    // Set the background image of the body element
-	    document.body.style.background = `url(${imageUrl}) center center fixed`;
-	    document.body.style.backgroundSize = 'cover';
-	    //document.body.style.backgroundPosition = 'center';
-	  })
-	  .catch(error => {
-	    console.error('Error fetching data:', error);
-	  });
+    /**
+     * Background image
+     *
+     * Loading strategy:
+     *   1. Use the photo queued up by the previous visit (saved in
+     *      localStorage), or ask Unsplash for a random one if there isn't one.
+     *      Unsplash includes a tiny "blur_hash" string (~30 chars) describing
+     *      a blurry version of the photo.
+     *   2. Decode the blur hash into a small image and show it right away.
+     *   3. Download a photo sized for this screen (not the multi-MB original)
+     *      and fade it in over the blur once it's fully decoded.
+     *   4. Fetch the next random photo, save it for the next visit and
+     *      download it so it's already in the browser cache.
+     */
+    const UNSPLASH_ACCESS_KEY = "9uCZ_OFTPqpmswnYTa6VdEc3rS-tZEFyU3vsdky0fGQ";
+    const UNSPLASH_RANDOM_PHOTO_URL =
+      "https://api.unsplash.com/photos/random?query=cool+wallpapers&orientation=landscape&content_filter=high";
+
+    const BlurHash = {
+      CHARACTERS:
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~",
+
+      // Blur hash numbers are written in base 83.
+      decodeBase83(text) {
+        let value = 0;
+        for (const character of text) {
+          value = value * 83 + BlurHash.CHARACTERS.indexOf(character);
+        }
+        return value;
+      },
+
+      srgbToLinear(value) {
+        const v = value / 255;
+        return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      },
+
+      linearToSrgb(value) {
+        const v = Math.max(0, Math.min(1, value));
+        const srgb =
+          v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+        return Math.round(srgb * 255);
+      },
+
+      signedPow(value, exponent) {
+        return Math.sign(value) * Math.pow(Math.abs(value), exponent);
+      },
+
+      // The first component is the average color of the image.
+      decodeAverageColor(value) {
+        return [
+          BlurHash.srgbToLinear(value >> 16),
+          BlurHash.srgbToLinear((value >> 8) & 255),
+          BlurHash.srgbToLinear(value & 255),
+        ];
+      },
+
+      // The other components describe how the color varies across the image.
+      decodeDetailColor(value, maxValue) {
+        const red = Math.floor(value / (19 * 19));
+        const green = Math.floor(value / 19) % 19;
+        const blue = value % 19;
+        return [red, green, blue].map(
+          (q) => BlurHash.signedPow((q - 9) / 9, 2) * maxValue
+        );
+      },
+
+      /**
+       * Turns a blur hash into a data URL for a width x height PNG.
+       * A small size (e.g. 32x32) is plenty: CSS stretches it smoothly.
+       */
+      toDataUrl(hash, width = 32, height = 32) {
+        const sizeFlag = BlurHash.decodeBase83(hash[0]);
+        const componentsX = (sizeFlag % 9) + 1;
+        const componentsY = Math.floor(sizeFlag / 9) + 1;
+        const maxValue = (BlurHash.decodeBase83(hash[1]) + 1) / 166;
+
+        const colors = [BlurHash.decodeAverageColor(BlurHash.decodeBase83(hash.slice(2, 6)))];
+        for (let i = 1; i < componentsX * componentsY; i++) {
+          const chunk = hash.slice(4 + i * 2, 6 + i * 2);
+          colors.push(BlurHash.decodeDetailColor(BlurHash.decodeBase83(chunk), maxValue));
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        const image = context.createImageData(width, height);
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            let red = 0;
+            let green = 0;
+            let blue = 0;
+
+            for (let j = 0; j < componentsY; j++) {
+              for (let i = 0; i < componentsX; i++) {
+                const basis =
+                  Math.cos((Math.PI * x * i) / width) *
+                  Math.cos((Math.PI * y * j) / height);
+                const color = colors[i + j * componentsX];
+                red += color[0] * basis;
+                green += color[1] * basis;
+                blue += color[2] * basis;
+              }
+            }
+
+            const pixel = 4 * (x + y * width);
+            image.data[pixel] = BlurHash.linearToSrgb(red);
+            image.data[pixel + 1] = BlurHash.linearToSrgb(green);
+            image.data[pixel + 2] = BlurHash.linearToSrgb(blue);
+            image.data[pixel + 3] = 255;
+          }
+        }
+
+        context.putImageData(image, 0, 0);
+        return canvas.toDataURL();
+      },
+    };
+
+    // Unsplash resizes on the fly via query params on the "raw" URL.
+    // Match the screen's physical width so we don't download more than needed.
+    function sizedPhotoUrl(photo) {
+      const width = Math.min(
+        3840,
+        Math.round(window.screen.width * (window.devicePixelRatio || 1))
+      );
+      return `${photo.urls.raw}&w=${width}&q=80&auto=format&fit=max`;
+    }
+
+    const NEXT_BACKGROUND_KEY = "nextBackground";
+
+    // localStorage can be unavailable (private mode, blocked storage), so
+    // treat any failure as "nothing saved".
+    function readSavedBackground() {
+      try {
+        return JSON.parse(localStorage.getItem(NEXT_BACKGROUND_KEY));
+      } catch {
+        return null;
+      }
+    }
+
+    function saveBackground(background) {
+      try {
+        localStorage.setItem(NEXT_BACKGROUND_KEY, JSON.stringify(background));
+      } catch {
+        // Not saved; the next visit will just fetch a photo itself.
+      }
+    }
+
+    // Returns just what we need to show a photo: { color, blurHash, url }.
+    async function fetchRandomBackground() {
+      const response = await fetch(UNSPLASH_RANDOM_PHOTO_URL, {
+        headers: { Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}` },
+      });
+      if (!response.ok) throw new Error(`Unsplash error: ${response.status}`);
+      const photo = await response.json();
+
+      return {
+        color: photo.color,
+        blurHash: photo.blur_hash,
+        url: sizedPhotoUrl(photo),
+      };
+    }
+
+    async function showBackground(background) {
+      const placeholderEl = $.el("#background-placeholder");
+      const photoEl = $.el("#background-photo");
+
+      // Show the average color, then the blur, instantly.
+      placeholderEl.style.backgroundColor = background.color;
+      if (background.blurHash) {
+        placeholderEl.style.backgroundImage = `url(${BlurHash.toDataUrl(background.blurHash)})`;
+      }
+
+      // Download and decode the real photo off-screen, then fade it in.
+      const image = new Image();
+      image.src = background.url;
+      await image.decode();
+      photoEl.style.backgroundImage = `url(${image.src})`;
+      photoEl.classList.add("loaded");
+    }
+
+    async function loadBackground() {
+      const current = readSavedBackground() ?? (await fetchRandomBackground());
+      const currentShown = showBackground(current).catch((error) => {
+        console.error("Could not show background:", error);
+      });
+
+      // Queue up the next photo for the next visit.
+      const next = await fetchRandomBackground();
+      saveBackground(next);
+
+      // Download it once the current photo is done, so the two don't compete
+      // for bandwidth. Unsplash images are cached by the browser, so the next
+      // visit shows it without waiting on the network.
+      await currentShown;
+      new Image().src = next.url;
+    }
+
+    loadBackground().catch((error) => {
+      console.error("Could not load background:", error);
+    });
   </script>
 </html>
